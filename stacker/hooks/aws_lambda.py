@@ -1,8 +1,11 @@
 import os
 import os.path
+import pip
 import stat
 import logging
 import hashlib
+import subprocess
+import re
 from StringIO import StringIO
 from zipfile import ZipFile, ZIP_DEFLATED
 import botocore
@@ -23,6 +26,11 @@ field of a ZIP entry.
 ZIP_PERMS_MASK = (stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO) << 16
 
 logger = logging.getLogger(__name__)
+
+
+def camel_to_snake(string):
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', string)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
 
 
 def _zip_files(files, root):
@@ -302,6 +310,13 @@ def _upload_function(s3_conn, bucket, prefix, name, options, follow_symlinks):
             "missing required property '{}' in function '{}'".format(
                 e.args[0], name))
 
+    # os.path.join will ignore other parameters if the right-most one is an
+    # absolute path, which is exactly what we want.
+    if not os.path.isabs(root):
+        root = os.path.abspath(os.path.join(get_config_directory(), root))
+
+    _install_requirements(name, root)
+
     includes = _check_pattern_list(options.get('include'), 'include',
                                    default=['**'])
     excludes = _check_pattern_list(options.get('exclude'), 'exclude',
@@ -309,10 +324,9 @@ def _upload_function(s3_conn, bucket, prefix, name, options, follow_symlinks):
 
     logger.debug('lambda: processing function %s', name)
 
-    # os.path.join will ignore other parameters if the right-most one is an
-    # absolute path, which is exactly what we want.
     if not os.path.isabs(root):
         root = os.path.abspath(os.path.join(get_config_directory(), root))
+
     zip_contents, content_hash = _zip_from_file_patterns(root,
                                                          includes,
                                                          excludes,
@@ -346,6 +360,16 @@ def select_bucket_region(custom_bucket, hook_region, stacker_bucket_region,
     else:
         region = stacker_bucket_region
     return region or provider_region
+
+def _install_requirements(name, target_directory):
+    function_file_name = camel_to_snake(name)
+    requirements_file_name = "{}/{}.requirements.txt".format(target_directory, function_file_name)
+    logger.info("Installing requirements for {} from file {} into directory {}".format(name, requirements_file_name, target_directory))
+    if os.path.isfile(requirements_file_name):
+        with open(requirements_file_name, 'r') as rf:
+            for line in rf.readlines():
+                subprocess.call(['pip', 'install', '--verbose', '--target', target_directory, "{}".format(line)])
+
 
 
 def upload_lambda_functions(context, provider, **kwargs):
