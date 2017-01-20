@@ -368,7 +368,7 @@ def _install_requirements(name, target_directory):
     if os.path.isfile(requirements_file_name):
         with open(requirements_file_name, 'r') as rf:
             for line in rf.readlines():
-                subprocess.call(['pip', 'install', '--verbose', '--target', target_directory, "{}".format(line)])
+                subprocess.call(['pip', 'install', '--target', target_directory, "{}".format(line)])
 
 
 
